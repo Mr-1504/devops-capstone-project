@@ -12,12 +12,15 @@ from tests.factories import AccountFactory
 from service.common import status  # HTTP Status Codes
 from service.models import db, Account, init_db
 from service.routes import app
+from service import talisman
 
 DATABASE_URI = os.getenv(
     "DATABASE_URI", "postgresql://postgres:postgres@localhost:5432/postgres"
 )
 
 BASE_URL = "/accounts"
+
+HTTPS_ENVIRON = {'wsgi.url_scheme': 'https'}
 
 
 ######################################################################
@@ -34,6 +37,7 @@ class TestAccountService(TestCase):
         app.config["SQLALCHEMY_DATABASE_URI"] = DATABASE_URI
         app.logger.setLevel(logging.CRITICAL)
         init_db(app)
+        talisman.force_https = False
 
     @classmethod
     def tearDownClass(cls):
@@ -140,29 +144,29 @@ class TestAccountService(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_update_account(self):
-            """It should Update an existing Account"""
-            test_account = AccountFactory()
-            response = self.client.post(BASE_URL, json=test_account.serialize())
-            self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        """It should Update an existing Account"""
+        test_account = AccountFactory()
+        response = self.client.post(BASE_URL, json=test_account.serialize())
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
 
-            new_account = response.get_json()
-            new_account["name"] = "Something Known"
-            response = self.client.put(f"{BASE_URL}/{new_account['id']}", json=new_account)
-            self.assertEqual(response.status_code, status.HTTP_200_OK)
-            updated_account = response.get_json()
-            self.assertEqual(updated_account["name"], "Something Known")
+        new_account = response.get_json()
+        new_account["name"] = "Something Known"
+        response = self.client.put(f"{BASE_URL}/{new_account['id']}", json=new_account)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        updated_account = response.get_json()
+        self.assertEqual(updated_account["name"], "Something Known")
 
     def test_update_account_not_found(self):
-            """It should not Update an Account that is not found"""
-            test_account = AccountFactory()
-            response = self.client.put(f"{BASE_URL}/0", json=test_account.serialize())
-            self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+        """It should not Update an Account that is not found"""
+        test_account = AccountFactory()
+        response = self.client.put(f"{BASE_URL}/0", json=test_account.serialize())
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
 
     def test_delete_account(self):
-            """It should Delete an Account"""
-            account = self._create_accounts(1)[0]
-            resp = self.client.delete(f"{BASE_URL}/{account.id}")
-            self.assertEqual(resp.status_code, status.HTTP_204_NO_CONTENT)
+        """It should Delete an Account"""
+        account = self._create_accounts(1)[0]
+        response = self.client.delete(f"{BASE_URL}/{account.id}")
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
 
     def test_get_account_list(self):
         """It should Get a list of Accounts"""
@@ -171,3 +175,16 @@ class TestAccountService(TestCase):
         self.assertEqual(resp.status_code, status.HTTP_200_OK)
         data = resp.get_json()
         self.assertEqual(len(data), 5)
+
+    def test_security_headers(self):
+        """It should return security headers"""
+        response = self.client.get('/', environ_overrides=HTTPS_ENVIRON)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        headers = {
+            'X-Frame-Options': 'SAMEORIGIN',
+            'X-Content-Type-Options': 'nosniff',
+            'Content-Security-Policy': "default-src 'self'; object-src 'none'",
+            'Referrer-Policy': 'strict-origin-when-cross-origin'
+        }
+        for key, value in headers.items():
+            self.assertEqual(response.headers.get(key), value)
